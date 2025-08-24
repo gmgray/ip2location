@@ -6,9 +6,9 @@ import argparse
 
 def rows_from_db1(csv_path):
     """
-    Oczekuje DB1 IPv4 CSV w formacie:
+    Expects DB1 IPv4 CSV with fields
     "IP_FROM","IP_TO","COUNTRY_CODE"
-    z IP w postaci liczb dziesiętnych (bez znaku).
+    where IP* is an integer coded value (unsigned)
     """
     with open(csv_path, newline='', encoding='utf-8') as f:
         rdr = csv.reader(f)
@@ -25,7 +25,7 @@ def rows_from_db1(csv_path):
 
 def range_to_cidrs(ip_from, ip_to):
     """
-    Zamienia zakres numeryczny (inclusive) na listę prefiksów CIDR.
+    Changes numeric range (inclusive) to CIDR prefix list.
     """
     start = ipaddress.IPv4Address(ip_from)
     end   = ipaddress.IPv4Address(ip_to)
@@ -33,27 +33,27 @@ def range_to_cidrs(ip_from, ip_to):
 
 def emit_mikrotik_rsc(cidrs, country_code, list_name=None):
     """
-    Zwraca tekst .rsc z /ip firewall address-list add ...
+    Returns .rsc MikroTik script file with firewall-compatible 
+    address list definition
     """
     if not list_name:
         list_name = f"Country-{country_code}"
     out = []
     out.append("/ip firewall address-list")
-    # opcjonalnie czyścimy starą listę
     out.append(f'remove [find list="{list_name}"]')
-    # dodajemy świeże wpisy
+    # new entries
     for net in cidrs:
         out.append(f'add list="{list_name}" address={net.exploded}')
     return "\n".join(out) + "\n"
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Generuj MikroTik .rsc address-list z IP2Location LITE DB1 (IPv4)."
+        description="Create MikroTik rsc script from IP2Location Lite DB1 (IPv4) CSV file"
     )
-    ap.add_argument("csv", help="Ścieżka do pliku IP2Location-Lite-DB1.csv (IPv4)")
-    ap.add_argument("-c", "--country", required=True, help="Kod kraju ISO2, np. PL")
-    ap.add_argument("-o", "--output", default=None, help="Plik wyjściowy .rsc (domyślnie Country-XX.rsc)")
-    ap.add_argument("--list-name", default=None, help="Nazwa address-list (domyślnie Country-XX)")
+    ap.add_argument("csv", help="CSV file location")
+    ap.add_argument("-c", "--country", required=True, help="ISO 02 Country Code, eg. PL")
+    ap.add_argument("-o", "--output", default=None, help="Output .rsc script file name (default Country-XX.rsc)")
+    ap.add_argument("--list-name", default=None, help="Address-list name (default Country-XX)")
     args = ap.parse_args()
 
     country = args.country.upper()
@@ -64,11 +64,11 @@ def main():
             continue
         cidrs.extend(range_to_cidrs(ip_from, ip_to))
 
-    # deduplikacja/normalizacja
-    # ipaddress.collapse_addresses scala nachodzące/ciągłe prefiksy
+    # dedup/normalize
+    # ipaddress.collapse_addresses merges overlapping / continuous ranges
     cidrs = list(ipaddress.collapse_addresses(cidrs))
 
-    # sortowanie dla powtarzalności
+    # 
     cidrs.sort(key=lambda n: (int(n.network_address), n.prefixlen))
 
     text = emit_mikrotik_rsc(cidrs, country_code=country, list_name=args.list_name)
@@ -76,7 +76,7 @@ def main():
     out_path = Path(args.output) if args.output else Path(f"Country-{country}.rsc")
     out_path.write_text(text, encoding="utf-8")
 
-    print(f"Wygenerowano {out_path} ({len(cidrs)} prefiksów CIDR)")
+    print(f"Created {out_path} ({len(cidrs)} CIDR prefixes)")
 
 if __name__ == "__main__":
     main()
